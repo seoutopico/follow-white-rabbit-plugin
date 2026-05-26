@@ -40,7 +40,7 @@ It will not touch anything until you confirm each step.
 
 | Path | Contains |
 |---|---|
-| `~/.claude/plugins/follow-white-rabbit/` | Plugin code (managed by Claude Code; do not edit) |
+| `~/.claude/plugins/cache/seoutopico/follow-white-rabbit/<version>/` | Plugin code (managed by Claude Code; do not edit) |
 | Your project directory | `config.yaml`, `.state/`, `feeds/`, your topic briefs |
 | Your GitHub repo (`gh-pages` branch) | The published feeds and HTML pages |
 
@@ -59,11 +59,32 @@ It will not touch anything until you confirm each step.
 - Optional: `gh` CLI (lets `/setup` create your destination repo automatically)
 - Windows / macOS / Linux
 
+## Repository layout
+
+This repository hosts the plugin. The marketplace catalog lives at the root; the plugin itself lives in a subdirectory:
+
+```
+.
+├── .claude-plugin/marketplace.json        # marketplace catalog
+├── README.md                              # this file
+├── LICENSE
+└── plugins/
+    └── follow-white-rabbit/               # the plugin
+        ├── .claude-plugin/plugin.json
+        ├── agents/                        # research-worker agent
+        ├── commands/                      # /setup, /cycle, /feedback
+        ├── skills/                        # topic-template skill
+        ├── bin/                           # feed.py, cycle.ps1, cycle.sh
+        ├── templates/                     # config + brief templates
+        ├── docs/                          # installation / scheduling / publishing
+        └── CHANGELOG.md
+```
+
 ## Docs
 
-- [docs/installation.md](docs/installation.md) — step-by-step installation walkthrough
-- [docs/scheduling.md](docs/scheduling.md) — scheduling cheatsheet (Task Scheduler / cron / launchd)
-- [docs/publishing.md](docs/publishing.md) — how the publish step works and how to activate GitHub Pages
+- [Installation](plugins/follow-white-rabbit/docs/installation.md) — step-by-step walkthrough
+- [Scheduling](plugins/follow-white-rabbit/docs/scheduling.md) — Task Scheduler / cron / launchd cheatsheet
+- [Publishing](plugins/follow-white-rabbit/docs/publishing.md) — how the publish step works and how to activate GitHub Pages
 
 ## License
 
