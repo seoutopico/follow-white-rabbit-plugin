@@ -4,13 +4,13 @@
 
 ## What it does
 
-You define topics in plain English. Every morning, a Claude agent researches them, writes deep briefings (sourced, deduplicated), and publishes:
+You define topics in plain English. Every day at the time you choose, a Claude agent researches them, writes deep briefings (sourced, deduplicated), and publishes:
 
 - **RSS feeds** for your reader (Feedly, Inoreader, Reeder, NetNewsWire, etc.)
 - **Readable HTML pages** at `https://<you>.github.io/<your-repo>/`
 - **A chronological archive** by date so you can search past entries (yourself or via an LLM)
 
-Everything runs inside your Claude Code subscription. No API keys, no external services.
+Runs entirely inside your Claude Code subscription — no paid APIs, no third-party SaaS. The only external service is GitHub Pages, which hosts the published output for free.
 
 ## Install
 
