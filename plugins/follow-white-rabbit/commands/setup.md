@@ -83,20 +83,33 @@ Tell the user: "Now let's define your topics. You can always add more later."
 
 Ask: "How many topics do you want to start with? (typical: 3-5)"
 
-For each topic, walk through this mini-flow:
+For each topic, walk through this mini-flow **in this exact order** — the identity questions (id, name) only make sense after we know what the topic IS, so they come AFTER the substantive ones:
 
-a. **ID**: "Slug for this topic — lowercase, dashes, no spaces. Examples: `ai-research`, `nba-news`, `local-music`."
-b. **Name**: "Display name in the feed (e.g. 'AI Research Highlights')."
+a. **What's this topic about?** (free text, the core question): "Describe in one sentence what this topic should cover. Don't worry about format yet — just tell me what you want to follow."
+   Example answers the user might give:
+   - "SEO trends and how Google ranking is changing with LLM-generated content"
+   - "NBA news, mostly Eastern Conference, focus on tactics and trades"
+   - "New Claude Code features, hooks, MCP servers"
+
+b. **Propose ID and display name from (a)**. Read the user's answer and derive:
+   - A slug: lowercase, dashes, no spaces, max 3-4 words. From "SEO trends and how Google ranking is changing with LLM-generated content" you'd propose `seo-llm-trends`.
+   - A display name: human title. From the same answer: "Tendencias SEO en la era de los LLMs".
+   - Show both and ask: "I'll call this topic `<slug>` (`<display name>`). OK, or do you want to change either?"
+   - If the user wants different ones, accept them. Validate the slug (lowercase, dashes, no spaces, no special chars).
+
 c. **Depth**: AskUserQuestion with options `quick (~200w)`, `standard (~400w)`, `deep (~600-800w)`.
-d. **Language**: "Output language for entries? ISO code (default: `en`)."
-e. **Target per cycle**: "Entries per run? (1-5, typical: 3)"
-f. **Scope** (free text): "What should this topic cover? Be specific."
-g. **Skip** (free text): "What should it AVOID? Helps the worker skip noise."
-h. **Writing style** (free text): "Tone and structure? E.g. 'senior dev colleague explaining something useful', 'critical analyst for a non-technical executive', 'casual and accessible'."
+
+d. **Language**: "Output language for entries? ISO code (default: `en`). Use `es` for Spanish, `fr` for French, etc."
+
+e. **Target per cycle**: "How many entries per run? (1-5, typical: 3)"
+
+f. **Skip** (free text, refines the brief): "What should this topic AVOID? Helps the worker skip noise. Examples: 'marketing fluff without technical substance', 'hiring/funding news', 'tutorials 101'."
+
+g. **Writing style** (free text): "Tone and structure? Examples: 'senior dev colleague explaining something useful', 'critical analyst for a non-technical executive', 'casual and accessible'."
 
 After each topic:
-- Append the topic block to `config.yaml` under `topics:` using Edit.
-- Create the brief file at `.claude/agents/topics/<id>.md` using `_template.md` as the structure, filled with the user's answers.
+- Append the topic block to `config.yaml` under `topics:` using Edit, with the values from c, d, e (depth, language, target) plus id and name from b.
+- Create the brief file at `.claude/agents/topics/<id>.md` using `_template.md` as the structure: the Scope section gets a polished version of (a), the Skip section gets (f), the Writing Style section gets (g) plus the depth target word count from (c).
 
 When all topics are done, append **one** feed entry to `config.yaml` under `feeds:`:
 ```yaml
