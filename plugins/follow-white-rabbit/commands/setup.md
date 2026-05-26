@@ -111,12 +111,22 @@ After each topic:
 - Append the topic block to `config.yaml` under `topics:` using Edit, with the values from c, d, e (depth, language, target) plus id and name from b.
 - Create the brief file at `.claude/agents/topics/<id>.md` using `_template.md` as the structure: the Scope section gets a polished version of (a), the Skip section gets (f), the Writing Style section gets (g) plus the depth target word count from (c).
 
-When all topics are done, append **one** feed entry to `config.yaml` under `feeds:`:
+When all topics are done, define the **feed bundle** — the RSS bundle that groups all topics together and gets a public URL.
+
+Important: the feed slug is a **permanent identifier** for the URL (`feeds/<slug>.xml`). It is NOT the cadence — the schedule is configured separately in Phase 7. Pick something that ages well even if you add unrelated topics later or change frequency. Do NOT propose names like `daily`, `weekly`, `morning` — they tie the URL to a cadence that may change.
+
+Walk through these questions:
+
+1. **Feed display name** (free text): "What should this feed bundle be called? Examples: 'My Research Briefings', 'Pocket Radar', 'Daily Tech Brief'."
+2. **Propose a slug derived from the display name**. Lowercase, dashes, no spaces. From "Pocket Radar" → `pocket-radar`. From "My Research Briefings" → `briefings`. Ask: "I'll use `<slug>` as the URL slug (`feeds/<slug>.xml`). OK or change?"
+3. **Feed description** (free text, optional): "One-line description shown in RSS readers. Press enter to skip."
+
+Then append **one** feed entry to `config.yaml` under `feeds:`:
 ```yaml
 - id: main
-  combined_feed: <feed-slug>          # ask the user for a short slug like 'briefings'
-  feed_name: "<Display name>"          # ask: "What should this feed bundle be called?"
-  feed_description: "<one line>"
+  combined_feed: <feed-slug>
+  feed_name: "<Display name>"
+  feed_description: "<one line, or empty>"
   split_by_topic: true
   topics: [<all topic ids>]
 ```
