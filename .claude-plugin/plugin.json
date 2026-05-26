@@ -1,0 +1,17 @@
+{
+  "name": "follow-white-rabbit",
+  "description": "Daily research briefings delivered as RSS feeds and readable HTML pages. Define your topics, Claude researches them every morning, publishes to your GitHub Pages.",
+  "version": "0.1.0",
+  "author": {
+    "name": "seoutopico"
+  },
+  "homepage": "https://github.com/seoutopico/follow-white-rabbit-plugin",
+  "license": "MIT",
+  "keywords": [
+    "rss",
+    "research",
+    "automation",
+    "feed",
+    "briefings"
+  ]
+}

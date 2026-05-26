@@ -1,0 +1,54 @@
+# follow-white-rabbit — project config
+#
+# Copy this to config.yaml and customise. The /setup wizard does this for
+# you interactively if you prefer.
+#
+# Concepts:
+#   topics  — what to research. Each one needs an editorial brief at
+#             .claude/agents/topics/<id>.md (see _template.md there).
+#   feeds   — RSS feed bundles that subscribe to one or more topics.
+
+settings:
+  feeds_dir: ./feeds
+  state_dir: ./.state
+  max_entries: 50                # per feed XML, oldest pruned automatically
+
+  # REQUIRED: GitHub Pages URL of YOUR repo. cycle.ps1 / cycle.sh will
+  # refuse to publish if this still contains placeholder text.
+  base_url: "https://your-user.github.io/your-repo"
+
+  # Optional: uncomment for instant feed-reader updates (Feedly, Inoreader…)
+  # websub_hub: "https://pubsubhubbub.appspot.com"
+
+# ---------------------------------------------------------------------------
+# TOPICS — defined per user. /setup adds them interactively.
+# ---------------------------------------------------------------------------
+#
+# Each topic entry needs:
+#   id:       short slug (also the brief filename)
+#   name:     display title shown in the feed
+#   depth:    quick (~200w) | standard (~400w) | deep (~600-800w)
+#   language: ISO code (default: en)
+#   target:   how many entries to aim for per cycle
+#   model:    optional — 'sonnet' for cheap factual work (default: opus)
+
+topics: []
+  # Example (uncomment and adapt):
+  # - id: my-topic
+  #   name: "My topic name"
+  #   depth: deep
+  #   language: en
+  #   target: 3
+
+# ---------------------------------------------------------------------------
+# FEEDS — RSS bundles. One feed subscribes to one or more topics.
+# ---------------------------------------------------------------------------
+
+feeds: []
+  # Example (uncomment and adapt):
+  # - id: main
+  #   combined_feed: my-feed                # becomes feeds/my-feed.xml
+  #   feed_name: "My research feed"
+  #   feed_description: "Daily research briefings"
+  #   split_by_topic: true                  # also publish per-topic XMLs
+  #   topics: [my-topic]
