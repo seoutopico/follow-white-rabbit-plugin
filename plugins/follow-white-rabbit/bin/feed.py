@@ -62,20 +62,33 @@ def fetch_og_image(url, timeout=10):
         return None
 
 
+_CONFIG_DIR = None  # set by load_config(); used by get_dirs() to anchor feeds/state paths
+
+
 def load_config(config_path=None):
-    """Load a config YAML file and return settings + feeds."""
+    """Load a config YAML file and return settings + feeds.
+
+    The config is resolved against the **current working directory** when no
+    explicit path is given, never against the location of feed.py itself.
+    This matters for plugin installs: feed.py lives in the plugin cache, but
+    each user's config.yaml lives in their own project directory.
+    """
     import yaml
 
+    global _CONFIG_DIR
+
     if config_path is None:
-        config_path = Path(__file__).parent / "config.yaml"
+        config_path = Path.cwd() / "config.yaml"
     else:
         config_path = Path(config_path)
         if not config_path.is_absolute():
-            config_path = Path(__file__).parent / config_path
+            config_path = Path.cwd() / config_path
+    config_path = config_path.resolve()
     if not config_path.exists():
         print(f"Error: {config_path} not found.", file=sys.stderr)
         sys.exit(1)
-    with open(config_path) as f:
+    _CONFIG_DIR = config_path.parent
+    with open(config_path, encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 
@@ -123,10 +136,16 @@ def get_all_xml_names(config):
 
 
 def get_dirs(config=None):
-    """Return (feeds_dir, state_dir) from config, creating if needed."""
+    """Return (feeds_dir, state_dir) from config, creating if needed.
+
+    Relative paths in feeds_dir / state_dir are resolved against the directory
+    of the loaded config.yaml (set by load_config()), so a user with their
+    config at /home/me/project/config.yaml ends up with feeds at
+    /home/me/project/feeds — regardless of where feed.py itself lives.
+    """
     if config is None:
         config = load_config()
-    base = Path(__file__).parent
+    base = _CONFIG_DIR if _CONFIG_DIR is not None else Path.cwd()
     feeds_dir = base / config.get("settings", {}).get("feeds_dir", "./feeds")
     state_dir = base / config.get("settings", {}).get("state_dir", "./.state")
     feeds_dir.mkdir(parents=True, exist_ok=True)

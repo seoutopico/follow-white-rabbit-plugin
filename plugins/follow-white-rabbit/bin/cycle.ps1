@@ -18,8 +18,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectDir = $PSScriptRoot
-Set-Location $ProjectDir
+
+# ProjectDir = wherever the user invoked cycle.ps1 from (their feed project),
+# NOT the directory where cycle.ps1 itself lives (the plugin cache).
+$ProjectDir = (Get-Location).Path
+# ScriptDir = where cycle.ps1 lives (plugin cache). Used only to locate feed.py.
+$ScriptDir  = $PSScriptRoot
+$FeedPy     = Join-Path $ScriptDir "feed.py"
+$ConfigPath = Join-Path $ProjectDir "config.yaml"
 
 # ---------- Logging ----------
 $LogsDir = Join-Path $ProjectDir ".logs"
@@ -53,15 +59,22 @@ foreach ($cmd in @("python", "claude", "git")) {
     }
 }
 
-if (-not (Test-Path "config.yaml")) {
-    Log "ERROR: config.yaml no encontrado en $ProjectDir. Aborto."
+if (-not (Test-Path $ConfigPath)) {
+    Log "ERROR: config.yaml no encontrado en $ProjectDir."
+    Log "       cycle.ps1 debe ejecutarse desde el directorio de tu proyecto"
+    Log "       (donde vive config.yaml). Si lo lanzas desde Task Scheduler,"
+    Log "       configura WorkingDirectory al directorio del proyecto."
+    exit 1
+}
+if (-not (Test-Path $FeedPy)) {
+    Log "ERROR: feed.py no encontrado en $FeedPy. Plugin instalado mal?"
     exit 1
 }
 
 # ---------- Parsea topics desde config.yaml ----------
 $topicsJson = python -c @"
 import json, yaml
-with open('config.yaml', encoding='utf-8') as f:
+with open(r'$ConfigPath', encoding='utf-8') as f:
     cfg = yaml.safe_load(f)
 out = []
 for t in cfg.get('topics', []):
@@ -85,8 +98,10 @@ if ($DryRun) {
     exit 0
 }
 
-# Inicializa feeds (idempotente, crea XMLs que falten)
-python feed.py init | Out-Null
+# Inicializa feeds (idempotente, crea XMLs que falten).
+# Set-Location asegura que feed.py resuelve config.yaml + feeds/ + .state/ en el proyecto del usuario.
+Set-Location $ProjectDir
+python $FeedPy init | Out-Null
 
 # ---------- Ronda de workers ----------
 function Spawn-Workers {
@@ -102,7 +117,7 @@ function Spawn-Workers {
         # Recuperar 'recently covered' para evitar duplicados
         $covered = ""
         try {
-            $stateOut = python feed.py state $t.id 2>$null
+            $stateOut = python $FeedPy state $t.id 2>$null
             if ($LASTEXITCODE -eq 0 -and $stateOut) {
                 $stateText = $stateOut -join "`n"
                 $match = [regex]::Match($stateText, '(?ms)^=== RECENTLY COVERED.*?(?=^===|\z)')
@@ -164,7 +179,7 @@ Spawn-Workers -RoundName "round1" -TopicsToRun $round1
 
 # ---------- Check de targets ----------
 Log "--- Comprobando targets ---"
-$checkOutput = python feed.py check-targets --run-id $RunId 2>&1
+$checkOutput = python $FeedPy check-targets --run-id $RunId 2>&1
 $checkOutput | ForEach-Object { Log $_ }
 
 $shortfallLine = $checkOutput | Where-Object { $_ -match "__SHORTFALLS_JSON__" } | Select-Object -First 1
@@ -187,7 +202,7 @@ if ($shortfallLine) {
         }
         Spawn-Workers -RoundName "retry" -TopicsToRun $retry
         Log "--- Check final ---"
-        python feed.py check-targets --run-id $RunId 2>&1 | ForEach-Object { Log $_ }
+        python $FeedPy check-targets --run-id $RunId 2>&1 | ForEach-Object { Log $_ }
     }
 } else {
     Log "Todos los targets se cumplieron en la primera ronda."
@@ -195,7 +210,7 @@ if ($shortfallLine) {
 
 # ---------- Prune ----------
 Log "--- Prune (max 50 entradas/feed) ---"
-python feed.py prune --keep 50 | ForEach-Object { Log $_ }
+python $FeedPy prune --keep 50 | ForEach-Object { Log $_ }
 
 # ---------- Publish ----------
 if ($SkipPublish) {
@@ -208,7 +223,7 @@ Log "--- Publicando a gh-pages ---"
 
 $baseUrl = python -c @"
 import yaml
-with open('config.yaml', encoding='utf-8') as f:
+with open(r'$ConfigPath', encoding='utf-8') as f:
     print(yaml.safe_load(f).get('settings', {}).get('base_url', ''))
 "@
 
@@ -218,10 +233,10 @@ if (-not $baseUrl) {
 }
 
 # Genera index.html, opml, paginas HTML legibles y archivo cronologico
-python feed.py index-html --base-url $baseUrl | Out-Null
-python feed.py opml --base-url $baseUrl | Out-Null
-python feed.py render-html --base-url $baseUrl | ForEach-Object { Log "  $_" }
-python feed.py render-archive --base-url $baseUrl | ForEach-Object { Log "  $_" }
+python $FeedPy index-html --base-url $baseUrl | Out-Null
+python $FeedPy opml --base-url $baseUrl | Out-Null
+python $FeedPy render-html --base-url $baseUrl | ForEach-Object { Log "  $_" }
+python $FeedPy render-archive --base-url $baseUrl | ForEach-Object { Log "  $_" }
 
 # Lock simple para evitar publishes concurrentes
 $LockDir = Join-Path $ProjectDir ".publish.lock"
@@ -327,7 +342,7 @@ try {
     # Ping WebSub si esta configurado
     $websub = python -c @"
 import yaml
-with open('config.yaml', encoding='utf-8') as f:
+with open(r'$ConfigPath', encoding='utf-8') as f:
     print(yaml.safe_load(f).get('settings', {}).get('websub_hub', ''))
 "@
 

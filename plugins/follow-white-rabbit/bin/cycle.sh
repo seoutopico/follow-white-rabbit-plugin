@@ -4,7 +4,26 @@
 # No LLM judgment in orchestration — every topic gets a worker, every time.
 
 set -euo pipefail
-cd "$(dirname "$0")"
+
+# Project directory = wherever the user invoked cycle.sh from (their feed project).
+# NOT the directory where cycle.sh itself lives (the plugin cache).
+PROJECT_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FEED_PY="$SCRIPT_DIR/feed.py"
+PUBLISH_SH="$SCRIPT_DIR/publish.sh"
+CONFIG_PATH="$PROJECT_DIR/config.yaml"
+
+if [ ! -f "$CONFIG_PATH" ]; then
+    echo "ERROR: config.yaml not found at $CONFIG_PATH" >&2
+    echo "       cycle.sh must be run from your project directory" >&2
+    echo "       (where config.yaml lives). For cron/launchd, set the" >&2
+    echo "       working directory to your project dir." >&2
+    exit 1
+fi
+if [ ! -f "$FEED_PY" ]; then
+    echo "ERROR: feed.py not found at $FEED_PY (plugin install broken?)" >&2
+    exit 1
+fi
 
 # --- Config ---
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
@@ -28,15 +47,15 @@ cleanup_publish() {
     if [ "$PUBLISHED" -eq 0 ]; then
         echo ""
         echo "--- Emergency publish (orchestration did not complete normally) ---"
-        $PYTHON feed.py prune --keep 50 || true
+        $PYTHON "$FEED_PY" prune --keep 50 || true
         local base_url
         base_url=$($PYTHON -c "
 import yaml
-with open('config.yaml') as f:
+with open(r'$CONFIG_PATH') as f:
     print(yaml.safe_load(f).get('settings',{}).get('base_url',''))
 " 2>/dev/null || true)
         if [ -n "$base_url" ]; then
-            bash publish.sh "$base_url" || true
+            bash "$PUBLISH_SH" "$base_url" || true
         fi
     fi
 }
@@ -45,7 +64,7 @@ trap cleanup_publish EXIT
 # Parse topics from config.yaml: topic_id|target|model
 TOPICS=$($PYTHON -c "
 import yaml
-with open('config.yaml') as f:
+with open(r'$CONFIG_PATH') as f:
     config = yaml.safe_load(f)
 for t in config.get('topics', []):
     model = t.get('model', 'opus')
@@ -53,7 +72,7 @@ for t in config.get('topics', []):
 ")
 
 # Init all feed XMLs
-$PYTHON feed.py init
+$PYTHON "$FEED_PY" init
 
 # Generate run ID
 RUN_ID=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -73,7 +92,7 @@ spawn_workers() {
 
         # Pre-fetch recently covered subjects so the worker sees them in the prompt
         local covered
-        covered=$($PYTHON feed.py state "$topic_id" 2>/dev/null | sed -n '/^=== RECENTLY COVERED/,/^===/p' || true)
+        covered=$($PYTHON "$FEED_PY" state "$topic_id" 2>/dev/null | sed -n '/^=== RECENTLY COVERED/,/^===/p' || true)
 
         local prompt="@research-worker Process topic '$topic_id' with run-id '$RUN_ID'. Your target is $target_or_gap entries."
         if [ -n "$covered" ]; then
@@ -131,7 +150,7 @@ spawn_workers "round1" "${round1_topics[@]}"
 
 # === Check targets ===
 echo "--- Checking targets ---"
-CHECK_OUTPUT=$($PYTHON feed.py check-targets --run-id "$RUN_ID" 2>&1) || true
+CHECK_OUTPUT=$($PYTHON "$FEED_PY" check-targets --run-id "$RUN_ID" 2>&1) || true
 echo "$CHECK_OUTPUT"
 echo ""
 
@@ -142,7 +161,7 @@ if echo "$CHECK_OUTPUT" | grep -q "__SHORTFALLS_JSON__"; then
     RETRY_LINES=$($PYTHON -c "
 import json, yaml, sys
 shortfalls = json.loads(sys.argv[1])
-with open('config.yaml') as f:
+with open(r'$CONFIG_PATH') as f:
     config = yaml.safe_load(f)
 topic_map = {t['id']: t for t in config.get('topics', [])}
 for s in shortfalls:
@@ -163,7 +182,7 @@ for s in shortfalls:
 
     # Final check (informational)
     echo "--- Final target check ---"
-    $PYTHON feed.py check-targets --run-id "$RUN_ID" 2>&1 || true
+    $PYTHON "$FEED_PY" check-targets --run-id "$RUN_ID" 2>&1 || true
     echo ""
 else
     echo "All targets met on first round!"
@@ -171,13 +190,13 @@ fi
 
 # === Prune and publish ===
 echo "--- Pruning and publishing ---"
-$PYTHON feed.py prune --keep 50
+$PYTHON "$FEED_PY" prune --keep 50
 BASE_URL=$($PYTHON -c "
 import yaml
-with open('config.yaml') as f:
+with open(r'$CONFIG_PATH') as f:
     print(yaml.safe_load(f).get('settings',{}).get('base_url',''))
 ")
-bash publish.sh "$BASE_URL"
+bash "$PUBLISH_SH" "$BASE_URL"
 PUBLISHED=1
 echo ""
 echo "=== Done ==="
