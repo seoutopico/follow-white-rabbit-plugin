@@ -113,13 +113,14 @@ After each topic:
 
 When all topics are done, define the **feed bundle** — the RSS bundle that groups all topics together and gets a public URL.
 
-Important: the feed slug is a **permanent identifier** for the URL (`feeds/<slug>.xml`). It is NOT the cadence — the schedule is configured separately in Phase 7. Pick something that ages well even if you add unrelated topics later or change frequency. Do NOT propose names like `daily`, `weekly`, `morning` — they tie the URL to a cadence that may change.
+Important: the feed slug is a **permanent identifier** for the URL (`feeds/<slug>.xml`). It is NOT the cadence — the schedule is configured separately in Phase 7. Do NOT propose names like `daily`, `weekly`, `morning`.
 
-Walk through these questions:
+Ask a single question: "What should the feed bundle be called? You can give me either a slug (`radar`, `briefings`, `my-feed`) or a friendly name (`My Research Radar`) — I'll derive the rest."
 
-1. **Feed display name** (free text): "What should this feed bundle be called? Examples: 'My Research Briefings', 'Pocket Radar', 'Daily Tech Brief'."
-2. **Propose a slug derived from the display name**. Lowercase, dashes, no spaces. From "Pocket Radar" → `pocket-radar`. From "My Research Briefings" → `briefings`. Ask: "I'll use `<slug>` as the URL slug (`feeds/<slug>.xml`). OK or change?"
-3. **Feed description** (free text, optional): "One-line description shown in RSS readers. Press enter to skip."
+Then **derive everything else without asking again**:
+- If the user typed a slug (single word, kebab-case, no spaces) → use it as `combined_feed`. Derive `feed_name` by capitalising and replacing dashes with spaces. Leave `feed_description` empty.
+- If the user typed a friendly name → derive `combined_feed` as kebab-case of the first 2-3 words, use the input as `feed_name`, leave `feed_description` empty.
+- Show the user the three derived values in one line: "OK — slug `<slug>`, name `<name>`. Continuing." Do NOT ask for confirmation; if they want to change anything, they can edit `config.yaml` later.
 
 Then append **one** feed entry to `config.yaml` under `feeds:`:
 ```yaml
