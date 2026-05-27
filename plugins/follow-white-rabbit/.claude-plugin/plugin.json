@@ -1,7 +1,6 @@
 {
   "name": "follow-white-rabbit",
-  "description": "Daily research briefings delivered as RSS feeds and readable HTML pages. Define your topics, Claude researches them every morning, publishes to your GitHub Pages.",
-  "version": "0.1.0",
+  "description": "Daily research briefings delivered as RSS feeds and readable HTML pages. Define your topics, Claude researches them every day at the time you choose, publishes to your GitHub Pages.",
   "author": {
     "name": "seoutopico"
   },
