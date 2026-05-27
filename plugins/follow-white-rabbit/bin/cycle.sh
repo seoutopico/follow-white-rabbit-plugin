@@ -188,14 +188,19 @@ else
     echo "All targets met on first round!"
 fi
 
-# === Prune and publish ===
-echo "--- Pruning and publishing ---"
+# === Prune, render and publish ===
+echo "--- Pruning, rendering, publishing ---"
 $PYTHON "$FEED_PY" prune --keep 50
 BASE_URL=$($PYTHON -c "
 import yaml
 with open(r'$CONFIG_PATH') as f:
     print(yaml.safe_load(f).get('settings',{}).get('base_url',''))
 ")
+$PYTHON "$FEED_PY" index-html     --base-url "$BASE_URL"
+$PYTHON "$FEED_PY" opml            --base-url "$BASE_URL"
+$PYTHON "$FEED_PY" render-html     --base-url "$BASE_URL"
+$PYTHON "$FEED_PY" render-archive  --base-url "$BASE_URL"
+$PYTHON "$FEED_PY" render-readme   --base-url "$BASE_URL"
 bash "$PUBLISH_SH" "$BASE_URL"
 PUBLISHED=1
 echo ""

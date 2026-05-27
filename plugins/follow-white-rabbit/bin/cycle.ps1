@@ -237,6 +237,7 @@ python $FeedPy index-html --base-url $baseUrl | Out-Null
 python $FeedPy opml --base-url $baseUrl | Out-Null
 python $FeedPy render-html --base-url $baseUrl | ForEach-Object { Log "  $_" }
 python $FeedPy render-archive --base-url $baseUrl | ForEach-Object { Log "  $_" }
+python $FeedPy render-readme --base-url $baseUrl | ForEach-Object { Log "  $_" }
 
 # Lock simple para evitar publishes concurrentes
 $LockDir = Join-Path $ProjectDir ".publish.lock"
@@ -305,10 +306,18 @@ try {
 
     $FeedsDir = Join-Path $ProjectDir "feeds"
     $copiedCount = 0
-    Get-ChildItem $FeedsDir -Filter "*.xml"  | ForEach-Object { Copy-Item $_.FullName $cloneDir -Force; $copiedCount++ }
-    Get-ChildItem $FeedsDir -Filter "*.html" | ForEach-Object { Copy-Item $_.FullName $cloneDir -Force; $copiedCount++ }
-    Get-ChildItem $FeedsDir -Filter "*.png" -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item $_.FullName $cloneDir -Force; $copiedCount++ }
-    if (Test-Path "$FeedsDir\index.opml") { Copy-Item "$FeedsDir\index.opml" $cloneDir -Force; $copiedCount++ }
+    # Top-level files (xml, html, opml, md, png) — anything but the lock dir/files.
+    Get-ChildItem $FeedsDir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -notin @('.lock') -and $_.Name -ne '.gitkeep' } |
+        ForEach-Object { Copy-Item $_.FullName $cloneDir -Force; $copiedCount++ }
+    # Subdirectories topics/ and archive/ — copy recursively, keep structure.
+    foreach ($sub in @('topics', 'archive')) {
+        $src = Join-Path $FeedsDir $sub
+        if (Test-Path $src) {
+            Copy-Item $src $cloneDir -Recurse -Force
+            $copiedCount += (Get-ChildItem $src -Recurse -File | Measure-Object).Count
+        }
+    }
     Log "  Copiados $copiedCount archivos a $cloneDir"
     if ($copiedCount -eq 0) {
         throw "No se copio ningun archivo a $cloneDir - algo esta mal con $FeedsDir. Aborto."

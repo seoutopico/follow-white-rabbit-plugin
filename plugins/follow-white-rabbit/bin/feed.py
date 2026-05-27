@@ -914,28 +914,29 @@ def generate_opml(config, base_url):
 
 
 def generate_index_html(config, base_url):
-    """Generate a simple index.html listing all user feeds."""
+    """Generate the landing index.html for the feed bundle.
+
+    Links to:
+      - topics/<slug>.html      (human-readable per topic + combined)
+      - <slug>.xml              (RSS, stays in root to keep subscriber URLs stable)
+      - archive/                (chronological archive)
+      - README.md               (public-facing readme)
+    """
     feeds_dir, state_dir = get_dirs(config)
     topics = config.get("topics", [])
     feed_defs = config.get("feeds", [])
 
-    # Count total entries across all topics
-    total_entries = 0
-    for topic in topics:
-        state = load_state(topic["id"], state_dir)
-        total_entries += len(state.get("entries", []))
+    base = base_url.rstrip('/')
 
-    # Build per-feed subscribe links (HTML for reading, XML for RSS readers)
+    # Per-feed subscribe block (combined HTML reading + RSS).
     feed_links = []
     for feed_def in feed_defs:
-        feed_html_url = f"{base_url.rstrip('/')}/{feed_def['combined_feed']}.html"
-        feed_xml_url = f"{base_url.rstrip('/')}/{feed_def['combined_feed']}.xml"
         feed_links.append(
-            f'    <a href="{feed_html_url}">{html.escape(feed_def["feed_name"])}</a> '
-            f'<a href="{feed_xml_url}" class="rss" title="RSS XML">RSS</a>'
+            f'    <a href="{base}/topics/{feed_def["combined_feed"]}.html">{html.escape(feed_def["feed_name"])}</a> '
+            f'<a href="{base}/{feed_def["combined_feed"]}.xml" class="rss" title="RSS XML">RSS</a>'
         )
 
-    # Build per-topic channel sections for split feeds (link to HTML reading pages)
+    # Per-topic channel links for split feeds.
     per_topic_html = ""
     for feed_def in feed_defs:
         if feed_def.get("split_by_topic"):
@@ -944,28 +945,26 @@ def generate_index_html(config, base_url):
                 topic = get_topic(config, topic_id)
                 topic_name = topic.get("name", topic_id) if topic else topic_id
                 slug = get_per_topic_feed_name(feed_def["combined_feed"], topic_id)
-                topic_html_url = f"{base_url.rstrip('/')}/{slug}.html"
-                topic_xml_url = f"{base_url.rstrip('/')}/{slug}.xml"
                 channel_links.append(
-                    f'<a href="{topic_html_url}">{html.escape(topic_name)}</a> '
-                    f'<a href="{topic_xml_url}" class="rss" title="RSS XML">RSS</a>'
+                    f'<a href="{base}/topics/{slug}.html">{html.escape(topic_name)}</a> '
+                    f'<a href="{base}/{slug}.xml" class="rss" title="RSS XML">RSS</a>'
                 )
             if channel_links:
-                per_topic_html += f'  <div class="channels"><strong>{html.escape(feed_def["feed_name"])} channels:</strong><br/>\n'
+                per_topic_html += f'  <div class="channels"><strong>{html.escape(feed_def["feed_name"])}</strong><br/>\n'
                 per_topic_html += "    " + " &middot; ".join(channel_links) + "\n"
                 per_topic_html += "  </div>\n"
 
     topic_list = ", ".join(t.get("name", t["id"]) for t in topics)
-
     subscribe_links = " &middot; ".join(feed_links)
+    last_update = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     parts = [
         '<!DOCTYPE html>',
-        '<html lang="en">',
+        '<html lang="es">',
         '<head>',
         '  <meta charset="utf-8">',
         '  <meta name="viewport" content="width=device-width, initial-scale=1">',
-        '  <title>RSS Research Feeds</title>',
+        '  <title>Follow the White Rabbit</title>',
         '  <style>',
         '    body { font-family: -apple-system, system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; color: #333; }',
         '    h1 { border-bottom: 2px solid #e0e0e0; padding-bottom: 0.5rem; }',
@@ -983,20 +982,21 @@ def generate_index_html(config, base_url):
         '  </style>',
         '</head>',
         '<body>',
-        '  <h1>RSS Research Feeds</h1>',
-        '  <p>Deep research briefings delivered as RSS feeds.</p>',
+        '  <h1>Follow the White Rabbit</h1>',
+        '  <p>Briefings diarios de investigación generados por Claude y publicados como feeds RSS y páginas HTML.</p>',
         '  <div class="subscribe">',
         f'    {subscribe_links}',
-        f'    &middot; <a href="{base_url.rstrip("/")}/index.opml">Import (OPML)</a>',
-        f'    &middot; <a href="{base_url.rstrip("/")}/archive.html"><strong>Archivo histórico</strong></a>',
+        f'    &middot; <a href="{base}/index.opml">Importar OPML</a>',
+        f'    &middot; <a href="{base}/archive/"><strong>Archivo histórico</strong></a>',
         '  </div>',
     ]
     if per_topic_html:
         parts.append(per_topic_html.rstrip())
     parts.extend([
         f'  <div class="topics"><strong>Topics:</strong> {html.escape(topic_list)}</div>',
-        f'  <div class="meta">{total_entries} entries &middot; {datetime.now(timezone.utc).strftime("%Y-%m-%d")}</div>',
-        f'  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a></footer>',
+        f'  <div class="meta">Última actualización: {last_update}</div>',
+        '  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a> &middot; '
+        'powered by <a href="https://github.com/seoutopico/follow-white-rabbit-plugin">follow-white-rabbit-plugin</a></footer>',
         '</body>',
         '</html>',
     ])
@@ -1014,10 +1014,11 @@ PAGE_CSS = """
   header .nav { font-size: 0.85rem; color: #666; }
   header .nav a { color: #0066cc; text-decoration: none; }
   header .nav a:hover { text-decoration: underline; }
-  article { padding: 1.5rem 0; border-bottom: 1px solid #eee; }
+  h3.day { margin: 2.5rem 0 0.5rem; padding-bottom: 0.4rem; border-bottom: 2px solid #e0e0e0; color: #444; font-size: 1.05rem; font-weight: 600; text-transform: lowercase; letter-spacing: 0.02em; }
+  h3.day:first-of-type { margin-top: 1rem; }
+  article { padding: 1.25rem 0; border-bottom: 1px solid #eee; }
   article:last-child { border-bottom: none; }
   article h2 { margin: 0 0 0.25rem; font-size: 1.3rem; line-height: 1.3; }
-  article .date { color: #999; font-size: 0.85rem; margin-bottom: 0.75rem; }
   article .body img, article .body figure img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.5rem 0; }
   article .body figure { margin: 1rem 0; }
   article .body figure figcaption { font-size: 0.85rem; color: #666; text-align: center; margin-top: 0.25rem; }
@@ -1067,7 +1068,12 @@ def _parse_feed_items(xml_path):
 
 
 def _render_page(title, description, items, base_url, xml_filename):
-    """Render a single HTML page for one feed (combined or per-topic)."""
+    """Render a single HTML page for one feed (combined or per-topic).
+
+    Pages live under topics/ on disk, so navigation back to root uses '../'.
+    Items are grouped visually by date with an h3 separator whenever the
+    date changes (items are already sorted newest first).
+    """
     rss_url = f"{base_url.rstrip('/')}/{xml_filename}"
     parts = [
         '<!DOCTYPE html>',
@@ -1082,7 +1088,7 @@ def _render_page(title, description, items, base_url, xml_filename):
         '<body>',
         '  <header>',
         f'    <h1>{html.escape(title)}</h1>',
-        f'    <div class="nav"><a href="./">&larr; Volver al inicio</a> &middot; <a href="{rss_url}">Suscribir RSS</a> &middot; {len(items)} entradas</div>',
+        f'    <div class="nav"><a href="../">&larr; Inicio</a> &middot; <a href="../archive/">Archivo</a> &middot; <a href="{rss_url}">Suscribir RSS</a> &middot; {len(items)} entradas</div>',
     ]
     if description:
         parts.append(f'    <p style="margin:0.5rem 0 0;color:#666;">{html.escape(description)}</p>')
@@ -1091,18 +1097,23 @@ def _render_page(title, description, items, base_url, xml_filename):
     if not items:
         parts.append('  <p style="color:#999;">Todavía no hay entradas en este feed.</p>')
     else:
+        current_day = None
         for it in items:
+            day = it.get("date_short", "")
+            if day and day != current_day:
+                parts.append(f'  <h3 class="day">{html.escape(_format_date_es(day))}</h3>')
+                current_day = day
             parts.append('  <article>')
             parts.append(f'    <h2>{html.escape(it["title"])}</h2>')
-            if it["date_short"]:
-                parts.append(f'    <div class="date">{it["date_short"]}</div>')
-            if it["image"]:
+            if it.get("image"):
                 parts.append(f'    <img class="thumb" src="{html.escape(it["image"])}" alt="">')
             parts.append(f'    <div class="body">{it["description"]}</div>')
             parts.append('  </article>')
 
     parts.extend([
-        f'  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a> &middot; {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}</footer>',
+        '  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a> &middot; '
+        'powered by <a href="https://github.com/seoutopico/follow-white-rabbit-plugin">follow-white-rabbit-plugin</a> &middot; '
+        f'{datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}</footer>',
         '</body>',
         '</html>',
     ])
@@ -1110,11 +1121,18 @@ def _render_page(title, description, items, base_url, xml_filename):
 
 
 def generate_topic_pages(config, base_url):
-    """Generate human-readable HTML pages: one per topic + one per combined feed."""
+    """Generate human-readable HTML pages under feeds_dir/topics/.
+
+    One file per combined feed + one per topic (when split_by_topic).
+    XML feeds stay at the feeds_dir root to keep RSS subscriber URLs stable;
+    the rendered HTML lives in topics/ to keep the gh-pages root uncluttered.
+    """
     feeds_dir, _ = get_dirs(config)
+    topics_dir = feeds_dir / "topics"
+    topics_dir.mkdir(parents=True, exist_ok=True)
+
     written = 0
     for feed_def in config.get("feeds", []):
-        # Combined feed page
         combined = feed_def["combined_feed"]
         xml_path = feed_path(feeds_dir, combined)
         title, desc, items = _parse_feed_items(xml_path)
@@ -1124,13 +1142,12 @@ def generate_topic_pages(config, base_url):
                 desc or feed_def.get("feed_description", ""),
                 items, base_url, f"{combined}.xml",
             )
-            out_path = feeds_dir / f"{combined}.html"
+            out_path = topics_dir / f"{combined}.html"
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(html_out)
             print(f"Generated page: {out_path} ({len(items)} entries)")
             written += 1
 
-        # Per-topic pages if split_by_topic
         if feed_def.get("split_by_topic"):
             for topic_id in feed_def.get("topics", []):
                 slug = get_per_topic_feed_name(combined, topic_id)
@@ -1144,7 +1161,7 @@ def generate_topic_pages(config, base_url):
                         t_desc or "",
                         t_items, base_url, f"{slug}.xml",
                     )
-                    out_path = feeds_dir / f"{slug}.html"
+                    out_path = topics_dir / f"{slug}.html"
                     with open(out_path, "w", encoding="utf-8") as f:
                         f.write(html_out)
                     print(f"Generated page: {out_path} ({len(t_items)} entries)")
@@ -1271,19 +1288,25 @@ def _format_date_es(date_str):
 
 
 def generate_archive_pages(config, base_url):
-    """Generate one HTML page per archived date + a chronological index."""
-    feeds_dir, _ = get_dirs(config)
-    by_date = _load_archive_entries(config)
+    """Generate the chronological archive under feeds_dir/archive/.
 
+    Layout:
+      archive/index.html       — chronological listing of all dates
+      archive/YYYY-MM-DD.html  — one page per day with all entries grouped by topic
+    """
+    feeds_dir, _ = get_dirs(config)
+    archive_dir = feeds_dir / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    by_date = _load_archive_entries(config)
     if not by_date:
         print("Archive is empty — nothing to render. Run backfill-archive first.")
         return
 
-    # Sort dates newest first
     sorted_dates = sorted(by_date.keys(), reverse=True)
     total_entries = sum(len(v) for v in by_date.values())
 
-    # ---- Index page ----
+    # ---- archive/index.html ----
     parts = [
         '<!DOCTYPE html>',
         '<html lang="es">',
@@ -1296,8 +1319,8 @@ def generate_archive_pages(config, base_url):
         '<body>',
         '  <header>',
         '    <h1>Archivo histórico</h1>',
-        f'    <div class="nav"><a href="./">&larr; Volver al inicio</a> &middot; {total_entries} entradas en {len(sorted_dates)} días</div>',
-        '    <p style="margin:0.5rem 0 0;color:#666;">Histórico completo de entradas por fecha de publicación. Cada día reúne todas las entradas de los 5 topics.</p>',
+        f'    <div class="nav"><a href="../">&larr; Inicio</a> &middot; {total_entries} entradas en {len(sorted_dates)} días</div>',
+        '    <p style="margin:0.5rem 0 0;color:#666;">Histórico completo de entradas por fecha de publicación. Cada día reúne todas las entradas de los topics activos.</p>',
         '  </header>',
         '  <ul style="list-style:none;padding:0;">',
     ]
@@ -1307,31 +1330,31 @@ def generate_archive_pages(config, base_url):
         topics_str = ", ".join(topics_in_day)
         parts.append(
             f'    <li style="padding:0.6rem 0;border-bottom:1px solid #eee;">'
-            f'<a href="archive-{date_str}.html"><strong>{html.escape(_format_date_es(date_str))}</strong></a> '
+            f'<a href="{date_str}.html"><strong>{html.escape(_format_date_es(date_str))}</strong></a> '
             f'<span style="color:#999;">— {len(entries)} entradas</span><br/>'
             f'<span style="font-size:0.85rem;color:#666;">{html.escape(topics_str)}</span>'
             f'</li>'
         )
     parts.extend([
         '  </ul>',
-        f'  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a> &middot; {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}</footer>',
+        '  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a> &middot; '
+        'powered by <a href="https://github.com/seoutopico/follow-white-rabbit-plugin">follow-white-rabbit-plugin</a> &middot; '
+        f'{datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}</footer>',
         '</body>',
         '</html>',
     ])
-    index_path = feeds_dir / "archive.html"
+    index_path = archive_dir / "index.html"
     with open(index_path, "w", encoding="utf-8") as f:
         f.write("\n".join(parts))
     print(f"Generated archive index: {index_path} ({len(sorted_dates)} days)")
 
-    # ---- One page per date ----
+    # ---- archive/YYYY-MM-DD.html ----
     pages_written = 0
     for date_str in sorted_dates:
         entries = by_date[date_str]
-        # Group by topic within the day
         by_topic = {}
         for e in entries:
             by_topic.setdefault(e["topic_name"], []).append(e)
-        # Sort entries within each topic by guid (stable) — no per-entry time available
         ordered_topics = sorted(by_topic.keys())
 
         page_parts = [
@@ -1347,7 +1370,7 @@ def generate_archive_pages(config, base_url):
             '<body>',
             '  <header>',
             f'    <h1>{html.escape(_format_date_es(date_str))}</h1>',
-            f'    <div class="nav"><a href="archive.html">&larr; Archivo</a> &middot; <a href="./">Inicio</a> &middot; {len(entries)} entradas</div>',
+            f'    <div class="nav"><a href="./">&larr; Archivo</a> &middot; <a href="../">Inicio</a> &middot; {len(entries)} entradas</div>',
             '  </header>',
         ]
 
@@ -1363,16 +1386,91 @@ def generate_archive_pages(config, base_url):
                 page_parts.append('  </article>')
 
         page_parts.extend([
-            f'  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a> &middot; {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}</footer>',
+            '  <footer>Generated by <a href="https://ainalluna.com/">ainalluna.com</a> &middot; '
+            'powered by <a href="https://github.com/seoutopico/follow-white-rabbit-plugin">follow-white-rabbit-plugin</a> &middot; '
+            f'{datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}</footer>',
             '</body>',
             '</html>',
         ])
-        out_path = feeds_dir / f"archive-{date_str}.html"
+        out_path = archive_dir / f"{date_str}.html"
         with open(out_path, "w", encoding="utf-8") as f:
             f.write("\n".join(page_parts))
         pages_written += 1
 
     print(f"Generated {pages_written} daily archive pages.")
+
+
+def generate_public_readme(config, base_url):
+    """Generate README.md at feeds_dir/ root for GitHub repo home page.
+
+    This file ships to gh-pages alongside the feeds, so when someone lands on
+    the destination GitHub repo they immediately see what's published and how
+    to subscribe.
+    """
+    feeds_dir, _ = get_dirs(config)
+    feed_defs = config.get("feeds", [])
+    topics = config.get("topics", [])
+    base = base_url.rstrip('/')
+
+    lines = [
+        "# Feeds publicados por follow-white-rabbit",
+        "",
+        f"Briefings diarios de investigación generados automáticamente y publicados en este repositorio (rama `gh-pages`). Última generación: **{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}**.",
+        "",
+        f"**Web pública:** <{base}/>",
+        f"**Archivo histórico:** <{base}/archive/>",
+        "",
+        "## Cómo suscribirse",
+        "",
+        "Pega cualquiera de estas URLs en tu lector de RSS (Feedly, Inoreader, Reeder, NetNewsWire, etc.) o importa el OPML para añadirlas todas de una vez:",
+        "",
+        f"- **OPML (importar todo)**: <{base}/index.opml>",
+        "",
+    ]
+
+    for feed_def in feed_defs:
+        combined = feed_def["combined_feed"]
+        lines.append(f"### {feed_def['feed_name']}")
+        if feed_def.get("feed_description"):
+            lines.append("")
+            lines.append(feed_def["feed_description"])
+        lines.append("")
+        lines.append(f"- **Feed combinado (todos los topics)**: <{base}/{combined}.xml> — [versión web]({base}/topics/{combined}.html)")
+        if feed_def.get("split_by_topic"):
+            lines.append("- **Feeds por topic:**")
+            for topic_id in feed_def.get("topics", []):
+                topic = get_topic(config, topic_id)
+                topic_name = topic.get("name", topic_id) if topic else topic_id
+                slug = get_per_topic_feed_name(combined, topic_id)
+                lines.append(f"    - {topic_name}: <{base}/{slug}.xml> — [web]({base}/topics/{slug}.html)")
+        lines.append("")
+
+    lines.extend([
+        "## Cómo se genera esto",
+        "",
+        "Este repo contiene **solo los artefactos publicados**: HTML, XML, JSON. El código que los genera vive en otro lugar:",
+        "",
+        "- **Plugin**: <https://github.com/seoutopico/follow-white-rabbit-plugin>",
+        "",
+        "Instalarlo en otro Claude Code:",
+        "",
+        "```",
+        "/plugin marketplace add seoutopico/follow-white-rabbit-plugin",
+        "/plugin install follow-white-rabbit@seoutopico",
+        "/setup",
+        "```",
+        "",
+        "Cada usuario tiene su propio repo destino y sus propios topics — este repo es el destino de **una** instalación concreta.",
+        "",
+        "---",
+        f"_Generado por [ainalluna.com](https://ainalluna.com/) con [follow-white-rabbit-plugin](https://github.com/seoutopico/follow-white-rabbit-plugin)._",
+        "",
+    ])
+
+    readme_path = feeds_dir / "README.md"
+    with open(readme_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"Generated public README: {readme_path}")
 
 
 def backfill_split(config, feeds_dir):
@@ -1557,8 +1655,12 @@ def main():
     p_render.add_argument("--base-url", required=True, help="Base URL where feeds are hosted")
 
     # render-archive (chronological archive pages: index + one per date)
-    p_arch = sub.add_parser("render-archive", help="Generate archive.html index + one archive-YYYY-MM-DD.html per date")
+    p_arch = sub.add_parser("render-archive", help="Generate archive/index.html + one archive/YYYY-MM-DD.html per date")
     p_arch.add_argument("--base-url", required=True, help="Base URL where feeds are hosted")
+
+    # render-readme (public README.md for gh-pages)
+    p_rdm = sub.add_parser("render-readme", help="Generate a public README.md listing all feed URLs")
+    p_rdm.add_argument("--base-url", required=True, help="Base URL where feeds are hosted")
 
     # backfill-archive (one-shot: read current XMLs and snapshot to archive/)
     sub.add_parser("backfill-archive", help="One-shot: snapshot all entries from current feed XMLs to .state/archive/")
@@ -1666,6 +1768,8 @@ def main():
         generate_topic_pages(config, args.base_url)
     elif args.command == "render-archive":
         generate_archive_pages(config, args.base_url)
+    elif args.command == "render-readme":
+        generate_public_readme(config, args.base_url)
     elif args.command == "backfill-archive":
         backfill_archive_from_xml(config)
     elif args.command == "check-targets":
