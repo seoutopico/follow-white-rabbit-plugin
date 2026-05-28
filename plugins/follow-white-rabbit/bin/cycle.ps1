@@ -248,15 +248,28 @@ if (Test-Path $LockDir) {
 New-Item -ItemType Directory -Path $LockDir -Force | Out-Null
 
 try {
-    # Helper: ejecuta un comando git y aborta si exit code != 0
+    # Helper: ejecuta un comando git y aborta si exit code != 0.
+    # NOTE Windows PowerShell 5.1: cuando se redirige stderr con 2>&1 sobre un
+    # ejecutable nativo, cada linea de stderr se envuelve en un ErrorRecord
+    # (NativeCommandError). git escribe a stderr cosas informativas no fatales
+    # ("Cloning into ...", "To <url>", el resumen del commit), y combinado con
+    # el $ErrorActionPreference="Stop" global del script, eso aborta antes de
+    # comprobar $LASTEXITCODE. Solucion: aislar el preference para esta llamada,
+    # ejecutar con 'Continue', y decidir el fallo solo por el exit code real.
     function Invoke-GitOrFail {
         param([string]$Description, [scriptblock]$Cmd)
-        Log "  > $Description"
-        $output = & $Cmd 2>&1
-        $exit = $LASTEXITCODE
-        $output | ForEach-Object { Log "    $_" }
-        if ($exit -ne 0) {
-            throw "git fallo en '$Description' (exit $exit). Aborto el publish."
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            Log "  > $Description"
+            $output = & $Cmd 2>&1
+            $exit = $LASTEXITCODE
+            $output | ForEach-Object { Log "    $_" }
+            if ($exit -ne 0) {
+                throw "git fallo en '$Description' (exit $exit). Aborto el publish."
+            }
+        } finally {
+            $ErrorActionPreference = $prev
         }
     }
 
