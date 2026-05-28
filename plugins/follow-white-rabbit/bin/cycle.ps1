@@ -90,7 +90,7 @@ if ($LASTEXITCODE -ne 0) {
 $Topics = $topicsJson | ConvertFrom-Json
 Log "Topics a procesar: $($Topics.Count)"
 foreach ($t in $Topics) {
-    Log "  - $($t.id) (target=$($t.target), model=$($t.model))"
+    Log "  - $($t.id) (target=$($t.target))"
 }
 
 if ($DryRun) {
@@ -103,57 +103,91 @@ if ($DryRun) {
 Set-Location $ProjectDir
 python $FeedPy init | Out-Null
 
-# ---------- Ronda de workers ----------
-function Spawn-Workers {
+# ---------- Workers en dos fases (scout Sonnet -> writer Opus) ----------
+# Por cada topic: primero scout (modelo barato) descubre + JSON de findings,
+# luego writer (modelo bueno) lee los findings y escribe. Cada fase es un
+# Job independiente. Los topics corren en paralelo dentro de una fase; las
+# fases (scout/writer) van en serie por topic.
+
+# Directorio donde el scout deja sus findings JSON (compartido entre fases).
+$FindingsRoot = Join-Path $ProjectDir ".state\findings\$RunId"
+New-Item -ItemType Directory -Path $FindingsRoot -Force | Out-Null
+
+function Run-Phase {
     param(
-        [string]$RoundName,
-        [array]$TopicsToRun  # array de objetos con .id .target .model y .extraPrompt opcional
+        [string]$PhaseName,             # 'scout' o 'writer'
+        [string]$AgentName,             # research-scout | research-writer
+        [string]$AgentModel,            # sonnet | opus
+        [array]$TopicsToRun,            # cada item: .id .target .extraPrompt (opcional) .findingsPath
+        [string]$RoundName              # round1 | retry (lo escribe el log)
     )
 
     $jobs = @()
     foreach ($t in $TopicsToRun) {
-        Log "  [$RoundName] $($t.id) target=$($t.target) model=$($t.model)"
+        Log "  [$RoundName/$PhaseName] $($t.id) (model=$AgentModel)"
 
-        # Recuperar 'recently covered' para evitar duplicados
-        $covered = ""
-        try {
-            $stateOut = python $FeedPy state $t.id 2>$null
-            if ($LASTEXITCODE -eq 0 -and $stateOut) {
-                $stateText = $stateOut -join "`n"
-                $match = [regex]::Match($stateText, '(?ms)^=== RECENTLY COVERED.*?(?=^===|\z)')
-                if ($match.Success) { $covered = $match.Value.Trim() }
+        $promptLines = @()
+        if ($PhaseName -eq 'scout') {
+            # Recuperar 'recently covered' para que scout filtre antes de buscar
+            $covered = ""
+            try {
+                $stateOut = python $FeedPy state $t.id 2>$null
+                if ($LASTEXITCODE -eq 0 -and $stateOut) {
+                    $stateText = $stateOut -join "`n"
+                    $match = [regex]::Match($stateText, '(?ms)^=== RECENTLY COVERED.*?(?=^===|\z)')
+                    if ($match.Success) { $covered = $match.Value.Trim() }
+                }
+            } catch {}
+
+            $promptLines += "@research-scout Process topic '$($t.id)' with run-id '$RunId'. Your target is $($t.target) findings."
+            $promptLines += "Write your findings JSON to: $($t.findingsPath)"
+            if ($covered) {
+                $promptLines += ""
+                $promptLines += $covered
+                $promptLines += ""
+                $promptLines += "Do NOT include findings about subjects above unless you have genuinely new facts."
             }
-        } catch {}
-
-        $prompt = "@research-worker Process topic '$($t.id)' with run-id '$RunId'. Your target is $($t.target) entries."
-        if ($covered) {
-            $prompt += "`n`n$covered`n`nDo NOT write entries about subjects listed above unless you have genuinely new facts."
+            if ($t.extraPrompt) {
+                $promptLines += ""
+                $promptLines += $t.extraPrompt
+            }
+        } else {
+            # writer
+            $promptLines += "@research-writer Process topic '$($t.id)' with run-id '$RunId'."
+            $promptLines += "Findings file (already produced by the scout): $($t.findingsPath)"
+            $promptLines += "Read it, write each finding as an entry following the topic brief and quality rules, then update knowledge and log."
         }
-        if ($t.extraPrompt) {
-            $prompt += "`n`n$($t.extraPrompt)"
-        }
 
-        $logFile = Join-Path $LogsDir "$($t.id)_$RoundName.log"
+        $prompt = $promptLines -join "`n"
+        $logFile = Join-Path $LogsDir "$($t.id)_${RoundName}_${PhaseName}.log"
 
-        $job = Start-Job -Name "worker-$($t.id)" -ScriptBlock {
-            param($workDir, $model, $prompt, $logFile)
+        $job = Start-Job -Name "${PhaseName}-$($t.id)" -ScriptBlock {
+            param($workDir, $model, $prompt, $logFile, $phase)
             Set-Location $workDir
+            # writer needs Write (feed.py add) and Bash; scout needs WebSearch/WebFetch/Write
+            $tools = if ($phase -eq 'scout') {
+                "WebSearch,WebFetch,Bash,Read,Grep,Glob,Write"
+            } else {
+                "Bash,Read,Grep,Glob,WebFetch"
+            }
             & claude --model $model -p $prompt `
-                --allowedTools "WebSearch,WebFetch,Bash,Read,Grep,Glob" `
+                --allowedTools $tools `
                 --permission-mode dontAsk *>&1 | Tee-Object -FilePath $logFile
             return $LASTEXITCODE
-        } -ArgumentList $ProjectDir, $t.model, $prompt, $logFile
+        } -ArgumentList $ProjectDir, $AgentModel, $prompt, $logFile, $PhaseName
 
         $jobs += [pscustomobject]@{ job = $job; topicId = $t.id; logFile = $logFile }
     }
 
-    Log "  [$RoundName] esperando $($jobs.Count) workers (timeout: ${WorkerTimeoutSeconds}s)..."
+    Log "  [$RoundName/$PhaseName] esperando $($jobs.Count) jobs (timeout: ${WorkerTimeoutSeconds}s)..."
 
     $deadline = (Get-Date).AddSeconds($WorkerTimeoutSeconds)
+    $results = @()
     foreach ($entry in $jobs) {
         $remaining = [int](($deadline - (Get-Date)).TotalSeconds)
         if ($remaining -lt 1) { $remaining = 1 }
         $finished = Wait-Job -Job $entry.job -Timeout $remaining
+        $ok = $false
         if (-not $finished) {
             Log "  TIMEOUT: $($entry.topicId)"
             Stop-Job -Job $entry.job -ErrorAction SilentlyContinue
@@ -161,13 +195,73 @@ function Spawn-Workers {
             $exit = Receive-Job -Job $entry.job -ErrorAction SilentlyContinue
             if ($entry.job.State -eq "Completed") {
                 Log "  OK: $($entry.topicId)"
+                $ok = $true
             } else {
                 Log "  FAIL: $($entry.topicId) (state=$($entry.job.State))"
             }
         }
         Remove-Job -Job $entry.job -Force -ErrorAction SilentlyContinue
+        $results += [pscustomobject]@{ topicId = $entry.topicId; ok = $ok }
     }
-    Log "  [$RoundName] hecho."
+    Log "  [$RoundName/$PhaseName] hecho."
+    return $results
+}
+
+# Orquestador de un round completo: scout -> writer encadenados.
+function Spawn-Workers {
+    param(
+        [string]$RoundName,
+        [array]$TopicsToRun     # cada item: .id .target .model .extraPrompt (opcional)
+    )
+
+    # Enriquecer cada topic con la ruta de findings que usaran scout y writer
+    $enriched = @()
+    foreach ($t in $TopicsToRun) {
+        $findingsPath = Join-Path $FindingsRoot "$($t.id).json"
+        $enriched += [pscustomobject]@{
+            id            = $t.id
+            target        = $t.target
+            model         = $t.model           # legacy: ignorado en este flujo (scout/writer fijan los suyos)
+            extraPrompt   = $t.extraPrompt
+            findingsPath  = $findingsPath
+        }
+    }
+
+    # Fase A: scout (Sonnet) en paralelo
+    $scoutResults = Run-Phase -PhaseName 'scout' -AgentName 'research-scout' -AgentModel 'sonnet' -TopicsToRun $enriched -RoundName $RoundName
+
+    # Fase B: writer (Opus) en paralelo, SOLO para topics donde el scout escribio el JSON.
+    $writeTopics = @()
+    foreach ($t in $enriched) {
+        $scoutOk = ($scoutResults | Where-Object { $_.topicId -eq $t.id }).ok
+        if (-not $scoutOk) {
+            Log "  SKIP writer/$($t.id) (scout fallo)"
+            continue
+        }
+        if (-not (Test-Path $t.findingsPath)) {
+            Log "  SKIP writer/$($t.id) (scout no genero findings file: $($t.findingsPath))"
+            continue
+        }
+        # Si el JSON tiene findings vacios, tampoco hace falta writer
+        try {
+            $findingsRaw = Get-Content $t.findingsPath -Raw -Encoding UTF8
+            $findingsObj = $findingsRaw | ConvertFrom-Json
+            if (-not $findingsObj.findings -or $findingsObj.findings.Count -eq 0) {
+                Log "  SKIP writer/$($t.id) (scout devolvio 0 findings: $($findingsObj.skipped_subjects.Count) skipped)"
+                continue
+            }
+        } catch {
+            Log "  WARN writer/$($t.id): no pude parsear findings JSON ($_). Lanzo writer igualmente."
+        }
+        $writeTopics += $t
+    }
+
+    if ($writeTopics.Count -eq 0) {
+        Log "  [$RoundName] No hay topics con findings para writer. Round terminado."
+        return
+    }
+
+    Run-Phase -PhaseName 'writer' -AgentName 'research-writer' -AgentModel 'opus' -TopicsToRun $writeTopics -RoundName $RoundName | Out-Null
 }
 
 # ---------- Ronda 1: todos los topics ----------

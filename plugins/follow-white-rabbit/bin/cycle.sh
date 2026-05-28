@@ -61,82 +61,150 @@ with open(r'$CONFIG_PATH') as f:
 }
 trap cleanup_publish EXIT
 
-# Parse topics from config.yaml: topic_id|target|model
+# Parse topics from config.yaml: topic_id|target
+# (model field is no longer read here: scout uses sonnet, writer uses opus, fixed in the agent defs.)
 TOPICS=$($PYTHON -c "
 import yaml
 with open(r'$CONFIG_PATH') as f:
     config = yaml.safe_load(f)
 for t in config.get('topics', []):
-    model = t.get('model', 'opus')
-    print(f\"{t['id']}|{t.get('target',0)}|{model}\")
+    print(f\"{t['id']}|{t.get('target',0)}\")
 ")
 
 # Init all feed XMLs
 $PYTHON "$FEED_PY" init
 
-# Generate run ID
+# Generate run ID and prepare findings dir for the scout phase
 RUN_ID=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+FINDINGS_ROOT="$PROJECT_DIR/.state/findings/$RUN_ID"
+mkdir -p "$FINDINGS_ROOT"
 echo "=== Research cycle: $RUN_ID ==="
 echo ""
 
-spawn_workers() {
-    local round_name="$1"
-    shift
+# Run one phase (scout or writer) for a batch of topics in parallel.
+# Inputs: phase_name, agent_model, round_name, then lines "topic_id|target|extra_prompt".
+# Echoes the topic_ids that succeeded (one per line) to stdout for the caller.
+run_phase() {
+    local phase_name="$1"
+    local agent_model="$2"
+    local round_name="$3"
+    shift 3
     local topics_to_run=("$@")
 
     local pids=()
     local topic_ids=()
+    local tools
+    if [ "$phase_name" = "scout" ]; then
+        tools="WebSearch,WebFetch,Bash,Read,Grep,Glob,Write"
+    else
+        tools="Bash,Read,Grep,Glob,WebFetch"
+    fi
+
     for line in "${topics_to_run[@]}"; do
-        IFS='|' read -r topic_id target_or_gap model extra_prompt <<< "$line"
-        echo "  [$round_name] $topic_id (target: $target_or_gap, model: $model)"
+        IFS='|' read -r topic_id target_or_gap extra_prompt <<< "$line"
+        local findings_path="$FINDINGS_ROOT/${topic_id}.json"
+        echo "  [$round_name/$phase_name] $topic_id (model=$agent_model)" >&2
 
-        # Pre-fetch recently covered subjects so the worker sees them in the prompt
-        local covered
-        covered=$($PYTHON "$FEED_PY" state "$topic_id" 2>/dev/null | sed -n '/^=== RECENTLY COVERED/,/^===/p' || true)
-
-        local prompt="@research-worker Process topic '$topic_id' with run-id '$RUN_ID'. Your target is $target_or_gap entries."
-        if [ -n "$covered" ]; then
-            prompt="$prompt
+        local prompt
+        if [ "$phase_name" = "scout" ]; then
+            local covered
+            covered=$($PYTHON "$FEED_PY" state "$topic_id" 2>/dev/null | sed -n '/^=== RECENTLY COVERED/,/^===/p' || true)
+            prompt="@research-scout Process topic '$topic_id' with run-id '$RUN_ID'. Your target is $target_or_gap findings.
+Write your findings JSON to: $findings_path"
+            if [ -n "$covered" ]; then
+                prompt="$prompt
 
 $covered
-Do NOT write entries about subjects listed above unless you have genuinely new facts."
-        fi
-        if [ -n "$extra_prompt" ]; then
-            prompt="$prompt $extra_prompt"
+Do NOT include findings about subjects above unless you have genuinely new facts."
+            fi
+            if [ -n "$extra_prompt" ]; then
+                prompt="$prompt
+
+$extra_prompt"
+            fi
+        else
+            prompt="@research-writer Process topic '$topic_id' with run-id '$RUN_ID'.
+Findings file (already produced by the scout): $findings_path
+Read it, write each finding as an entry following the topic brief and quality rules, then update knowledge and log."
         fi
 
         "$TIMEOUT_BIN" --kill-after=30 "$WORKER_TIMEOUT" \
-            "$CLAUDE_BIN" --model "$model" -p "$prompt" \
-            --allowedTools "WebSearch,WebFetch,Bash,Read,Grep,Glob" \
+            "$CLAUDE_BIN" --model "$agent_model" -p "$prompt" \
+            --allowedTools "$tools" \
             --permission-mode dontAsk \
-            > ".logs/${topic_id}_${round_name}.log" 2>&1 &
+            > "$PROJECT_DIR/.logs/${topic_id}_${round_name}_${phase_name}.log" 2>&1 &
         pids+=($!)
         topic_ids+=("$topic_id")
     done
 
-    echo "  Waiting for ${#pids[@]} workers (timeout: ${WORKER_TIMEOUT}s)..."
-    local failed=()
+    echo "  Waiting for ${#pids[@]} ${phase_name}s (timeout: ${WORKER_TIMEOUT}s)..." >&2
     local i=0
     for pid in "${pids[@]}"; do
         local exit_code=0
         wait "$pid" || exit_code=$?
         local tid="${topic_ids[$i]}"
         if [ "$exit_code" -eq 124 ] || [ "$exit_code" -eq 137 ]; then
-            echo "  TIMEOUT: $tid (killed after ${WORKER_TIMEOUT}s)"
-            failed+=("$tid:timeout")
+            echo "  TIMEOUT: $tid (killed after ${WORKER_TIMEOUT}s)" >&2
         elif [ "$exit_code" -ne 0 ]; then
-            echo "  FAILED: $tid (exit code $exit_code)"
-            failed+=("$tid:exit-$exit_code")
+            echo "  FAILED: $tid (exit $exit_code)" >&2
         else
-            echo "  OK: $tid"
+            echo "  OK: $tid" >&2
+            echo "$tid"   # success line on stdout
         fi
         i=$((i + 1))
     done
-    if [ ${#failed[@]} -gt 0 ]; then
-        echo "  [$round_name] Failures: ${failed[*]}"
+    echo "  [$round_name/$phase_name] Done." >&2
+    echo "" >&2
+}
+
+# Orchestrate one round: scout (Sonnet) parallel, then writer (Opus) parallel
+# for topics where the scout produced a non-empty findings file.
+spawn_workers() {
+    local round_name="$1"
+    shift
+    local topics_to_run=("$@")
+
+    # Phase A: scout
+    local scout_ok
+    scout_ok=$(run_phase "scout" "sonnet" "$round_name" "${topics_to_run[@]}")
+
+    # Phase B: writer — only for topics where scout succeeded AND wrote a non-empty findings JSON
+    local write_lines=()
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        IFS='|' read -r topic_id target_or_gap extra_prompt <<< "$line"
+        local findings_path="$FINDINGS_ROOT/${topic_id}.json"
+        if ! grep -qx "$topic_id" <<< "$scout_ok"; then
+            echo "  SKIP writer/$topic_id (scout failed)" >&2
+            continue
+        fi
+        if [ ! -f "$findings_path" ]; then
+            echo "  SKIP writer/$topic_id (scout did not produce $findings_path)" >&2
+            continue
+        fi
+        # Quick check: if findings array is empty, skip writer
+        local n_findings
+        n_findings=$($PYTHON -c "
+import json, sys
+try:
+    d = json.load(open(r'$findings_path'))
+    print(len(d.get('findings', [])))
+except Exception:
+    print(0)
+")
+        if [ "$n_findings" = "0" ]; then
+            echo "  SKIP writer/$topic_id (scout returned 0 findings)" >&2
+            continue
+        fi
+        write_lines+=("$line")
+    done <<< "$(printf '%s\n' "${topics_to_run[@]}")"
+
+    if [ ${#write_lines[@]} -eq 0 ]; then
+        echo "  [$round_name] No topics with findings — round done." >&2
+        return
     fi
-    echo "  [$round_name] Done."
-    echo ""
+
+    run_phase "writer" "opus" "$round_name" "${write_lines[@]}" > /dev/null
 }
 
 # === Round 1: All topics ===
@@ -165,10 +233,8 @@ with open(r'$CONFIG_PATH') as f:
     config = yaml.safe_load(f)
 topic_map = {t['id']: t for t in config.get('topics', [])}
 for s in shortfalls:
-    t = topic_map.get(s['topic_id'], {})
-    model = t.get('model', 'opus')
     extra = f\"Previous round produced {s['added']}/{s['target']}. Try to produce {s['gap']} more entries by searching different sub-topics and broadening scope. Do NOT re-cover subjects already in state — check the RECENTLY COVERED list. If you cannot find genuinely new subjects after thorough searching, producing fewer is OK.\"
-    print(f\"{s['topic_id']}|{s['gap']}|{model}|{extra}\")
+    print(f\"{s['topic_id']}|{s['gap']}|{extra}\")
 " "$SHORTFALLS_JSON")
 
     # === Round 2: Retry shortfalls ===
