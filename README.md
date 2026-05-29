@@ -92,6 +92,14 @@ This repository hosts the plugin. The marketplace catalog lives at the root; the
 - [Scheduling](plugins/follow-white-rabbit/docs/scheduling.md) — Task Scheduler / cron / launchd cheatsheet
 - [Publishing](plugins/follow-white-rabbit/docs/publishing.md) — how the publish step works and how to activate GitHub Pages
 
+## Autora
+
+Hecho por [Aina Lluna](https://ainalluna.com/).
+
+Si te interesa la IA aplicada, la gestión de proyectos con LLMs y cómo construir sistemas personales sobre Claude Code, suscríbete a mi newsletter en [ainalluna.substack.com](https://ainalluna.substack.com/).
+
+Si este repo te resulta útil, una estrella en GitHub o un comentario por el canal que prefieras se agradece.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
